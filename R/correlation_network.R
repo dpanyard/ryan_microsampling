@@ -1,6 +1,7 @@
 sxtTools::setwd_project()
 setwd("data/")
 library(tidyverse)
+rm(list = ls())
 load("shake_omics.RData")
 
 cytokine_data <- 
