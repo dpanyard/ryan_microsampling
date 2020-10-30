@@ -7,10 +7,12 @@ setwd("data/7_24_mike/")
 library(tidyverse)
 rm(list = ls())
 
-load("MOmics_01.RData")
+load("raw_data_from_box/MOmics_01.RData")
 
-time_anno = read.csv("TimeAnno.csv")
-time_anno = time_anno %>% select(-time, -date) %>% rename(DT = date_time)
+time_anno = read.csv("raw_data_from_box/TimeAnno.csv")
+time_anno = time_anno %>%
+  dplyr::select(-time, -date) %>%
+  dplyr::rename(DT = date_time)
 events = gather(time_anno,"Type","Details",5:6)
 events = events[!is.na(events$Details),]
 
@@ -27,10 +29,11 @@ lipids = DF247_lipids2[,c(1,2,4,5,10,13)]
 lipids$SampleID = as.numeric(gsub("24_7_prepsample","",lipids$SampleID))
 lipids = lipids[!is.na(lipids$SampleID),]
 lipids$MolClass = "Lipid"
-lipids = rename(lipids, MolName = LipidSpecies, MolSubclass = LipidClass, Intensity = log_sample_nmol_per_g_concentration, DT = CollectionTime_format)
-lipids = select(lipids, -collector)
+lipids <- 
+  dplyr::rename(lipids, MolName = LipidSpecies, MolSubclass = LipidClass, Intensity = log_sample_nmol_per_g_concentration, DT = CollectionTime_format)
+lipids <- 
+  select(lipids, -collector)
 lipids$SampleID = as.character(lipids$SampleID)
-
 
 sample_info <-
   lipids %>%
@@ -91,14 +94,16 @@ save(expression_data, file = "lipidomics/data_preparation/expression_data")
 
 ###### proteins - plasma
 library(data.table)
-proteins <- data.table(fread("allproteins_overtime_annotated_Mike247plasma.csv"), sep='\t')
-uniprot = read.csv("uniprot_match.csv")
+proteins <- data.table(fread("raw_data_from_box/allproteins_overtime_annotated_Mike247plasma.csv"), sep='\t')
+uniprot = read.csv("raw_data_from_box/uniprot_match.csv")
 uniprot$Entry_name = gsub("_HUMAN","",uniprot$Entry_name)
 proteinsL = gather(proteins[,c(1:313,321,325)], Sample, Intensity, 1:313)
 proteinsL = left_join(proteinsL,select(uniprot,Entry,Entry_name), by=c("Sample"="Entry"))
 proteinsL = subset(proteinsL,!is.na(Entry_name))
 proteinsL = unite(data = proteinsL, col = "MolName", Sample, Entry_name)
-proteinsL = proteinsL %>% rename(DT = date_time, SampleID = SampleIndex)
+proteinsL <-
+  proteinsL %>%
+  dplyr::rename(DT = date_time, SampleID = SampleIndex)
 proteinsL$MolClass = "Protein"
 proteinsL$MolSubclass = ""
 proteinsL$SampleID = as.character(proteinsL$SampleID)
@@ -164,113 +169,158 @@ variable_info <-
 variable_info %>% 
   dplyr::left_join(uniprot, by = c("protein_name2" = "Entry_name"))
 
-
 save(sample_info, file = "proteomics/data_preparation/sample_info")
 save(variable_info, file = "proteomics/data_preparation/variable_info")
 save(expression_data, file = "proteomics/data_preparation/expression_data")
 
 
-
-
-
-
-
-
-
-
-
 ############## metabolomics----------------------------------------------------
-metab_all = read.csv("raw_data_from_box/Microsampling_247_combined_all.csv")
+met_data <-
+  read.csv("raw_data_from_box/Microsampling_247_combined_all.csv")
+
+met_data$name <- paste(met_data$Mode, met_data$Compounds_ID, sep = '_')
+
+library(plyr)
+
+met_data <- 
+met_data %>% 
+  plyr::dlply(.variables = .(Mode)) %>% 
+  purrr::map(.f = function(x){
+    x <- 
+      x %>% 
+      dplyr::distinct(name, .keep_all = TRUE)
+    x 
+  }) %>% 
+  do.call(rbind, .) %>% 
+  as.data.frame()
 
 ### metID
-pR = read.csv("metabolomics/metID_Microsampling_247/RPLC/pos/identification.table.new_pRPLC.csv")
-nR = read.csv("metabolomics/metID_Microsampling_247/RPLC/neg/identification.table.new_nRPLC.csv")
-pH = read.csv("metabolomics/metID_Microsampling_247/HILIC/pos/identification.table.new_pHILIC.csv")
-nH = read.csv("metabolomics/metID_Microsampling_247/HILIC/neg/identification.table.new_nHILIC.csv")
+rplc_pos_anno = read.csv(
+  "metabolomics/metID_Microsampling_247/RPLC/pos/identification.table.new_pRPLC.csv"
+) %>% 
+  dplyr::distinct(name, .keep_all = TRUE)
 
-pR$mode="pR"
-nR$mode="nR"
-pH$mode="pH"
-nH$mode="nH"
-all_metID = rbind(pR,nR,pH,nH)
+rplc_neg_anno = read.csv(
+  "metabolomics/metID_Microsampling_247/RPLC/neg/identification.table.new_nRPLC.csv"
+) %>% 
+  dplyr::distinct(name, .keep_all = TRUE)
 
-mets_join = left_join(metab_all,all_metID,by=c("Compounds_ID"="name"))
-write.table(mets_join,file="metabolomics/24-7_joined_110820b.csv",sep=",",row.names=F)
+hilic_pos_anno = read.csv(
+  "metabolomics/metID_Microsampling_247/HILIC/pos/identification.table.new_pHILIC.csv"
+) %>% 
+  dplyr::distinct(name, .keep_all = TRUE)
 
-mets_join %>% ungroup %>% group_by(mode) %>% summarise(count = n())
+hilic_neg_anno = read.csv(
+  "metabolomics/metID_Microsampling_247/HILIC/neg/identification.table.new_nHILIC.csv"
+) %>% 
+  dplyr::distinct(name, .keep_all = TRUE)
 
-metab_all = subset(metab_all, !Metabolite_val %in% 
-                     c("0", "", "NA")) %>% 
-  select(Metabolite_val:CAS_val, Super.pathway:Sub.pathway, X1:X106)
+rplc_pos_anno$mode <- "RPLC_pos"
+rplc_neg_anno$mode <- "RPLC_neg"
+hilic_pos_anno$mode <- "HILIC_pos"
+hilic_neg_anno$mode <- "HILIC_neg"
 
-j = inner_join(
-  metab_all,
-  select(all_metID, name, Compound.name:Database),
-  by = c("Compounds_ID" = "name")
-)
+met_tags = rbind(rplc_pos_anno,rplc_neg_anno,hilic_pos_anno,hilic_neg_anno)
 
-j=select(j,Compound.name:Database,everything())
+met_tags$name <- 
+  paste(met_tags$mode, met_tags$name, sep = "_")
 
-j=j[!duplicated(j$Compounds_ID),]
+expression_data <-
+  met_data %>%
+  dplyr::select(-c(mz, m.z, RT)) %>% 
+  dplyr::left_join(met_tags, by = c("name"))
 
-write.table(j,file="24-7_joined.csv",sep=",",row.names=F)
+variable_info <- 
+  expression_data[,-grep("X[0-9]{1,3}|QC", colnames(expression_data))]
 
-inj_order = read_excel("/Users/ryankellogg/Box/Microsampling/metabolites/MS_247/Data/metabolomics/M-Sampling-Brittany.xlsx","247 ome")
-inj_order = rename(inj_order, SampleID = "PrepIndex (SampleName)")
-inj_order$AcqOrder = paste0("X", inj_order$AcqOrder)
+expression_data <- 
+  expression_data[,grep("X[0-9]{1,3}|QC", colnames(expression_data))]
 
-metab = gather(metab_all,AcqOrder,Intensity,-(Metabolite_val:Sub.pathway))
-metab = rename(metab,MolName = Metabolite_val, HMDB_ID = HMDB_val)
-metab = left_join(metab,select(inj_order,AcqOrder,SampleID)) %>% select(-AcqOrder)
+variable_info <- 
+  variable_info %>% 
+  dplyr::mutate(name = paste(Mode, Compounds_ID, sep = "_")) %>% 
+  dplyr::select(-c(X.1, X, Neutral.mass..Da., Charge, Retention.time..min., Identifications, Accepted.Compound.ID, Accepted.Description,
+                   Score, Fragmentation.Score, Mass.Error..ppm., Isotope.Similarity, Retention.Time.Error..mins.,
+                   Compound.Link, Mode, Compounds_ID)) %>% 
+  dplyr::select(name, mz, rt, MS2.spectrum.name:Database, everything())
+  
 
-# median norm
-metab = metab %>% group_by(SampleID) %>% mutate(Intensity = log10(Intensity/median(Intensity)))
-#metab$SampleID = as.numeric(gsub("X24_7_prepsample","",metab$SampleID))
-metab = metab[!is.na(metab$SampleID),]
-metab$SampleID = as.character(metab$SampleID)
+variable_info$name
 
-anno = read.csv("/Users/ryankellogg/Box/Microsampling/Analysis/annotations/24_7_Stability_MasterIDReferenz_DH4_KE2_rk.csv")
-metab = left_join(metab,anno[,c("PrepID","CollectionTime", "collector")], by=c("SampleID" = "PrepID"))
-metab$DT = as.POSIXct(metab$CollectionTime, tz = "America/Los_Angeles", format = "%m/%d/%y %H:%M")
-metab = select(metab, -collector, -CollectionTime)
-metab$MolClass = "Metabolite"
-metab$MolSubclass = NA
-metab = subset(metab, !is.na(DT))
-#metab$MolName = make.unique(as.character(metab$MolName))
-metab = metab %>% group_by(SampleID) %>% mutate(MolName = make.unique(as.character(MolName)))
+rownames(expression_data) <- variable_info$name
 
-# weird sample #50
-metab = metab[metab$SampleID != 50,]
-metab=subset(metab, !(DT=="2019-05-05 09:11:00" & metab$MolName=="Caffeine"))
+variable_info <- 
+  variable_info %>% 
+  dplyr::rename(variable_id = name)
 
+sample_info <- 
+  data.frame(injection_order = colnames(expression_data)) %>% 
+  dplyr::mutate(class = case_when(
+    stringr::str_detect(injection_order, "QC") ~ "QC",
+    TRUE ~ "Subject"
+  ))
 
+##injection order
+inj_order <- readxl::read_xlsx("raw_data_from_box/M-Sampling-Brittany.xlsx")
+inj_order <-
+  dplyr::rename(inj_order, sample_id = "PrepIndex (SampleName)")
 
-# metabolic protein panel
-MetaData=read.csv("/Users/ryankellogg/Box/Microsampling/Analysis/annotations/Copy of 24_7_Stability_MasterIDReferenz_DH4_KE2.csv") 
+inj_order$AcqOrder <- paste0("X", inj_order$AcqOrder)
 
-MetaData = MetaData[MetaData$Study == "F0" & MetaData$Original_SampleID %in% 1:97,]
-MetaData$Name = paste("DH-",MetaData$Original_SampleID,sep="")
+sample_info <-
+  sample_info %>%
+  dplyr::left_join(inj_order, by = c("injection_order" = "AcqOrder")) %>% 
+  dplyr::filter(!is.na(sample_id))
 
-MP = read.csv("/Users/ryankellogg/Box/Microsampling/cytokines/24-7 omics-MetabolicHormone-Ryan Metabolic Plate-1.csv")
-MP = MP[2:97,]
+expression_data <- 
+  expression_data %>% 
+  dplyr::select(one_of(sample_info$injection_order))
 
-MP = left_join(MP,MetaData[,c("Name","CollectionTime","PrepIndex")])
-MP$DT = as.POSIXct(MP$CollectionTime, tz = "America/Los_Angeles", format = "%m/%d/%y %H:%M")
-MPL = gather(MP,"Cytokine","MFI",5:21)
-MPL$Intensity = log10(as.numeric(MPL$MFI))
-MPL = rename(MPL, MolName = Cytokine, SampleID=PrepIndex)
-MPL$MolClass = "MetabolicPanel"
-MPL$MolSubclass = NA
-MPL = select(MPL, SampleID, DT, MolName, Intensity, MolClass, MolSubclass)
-MPL[MPL$MolName=="TNFA",]$MolName = "TNFA_MP"
-MPL[MPL$MolName=="MCP1",]$MolName = "MCP1_MP"
-MPL[MPL$MolName=="CHEX1",]$MolName = "CHEX1_MP"
-MPL[MPL$MolName=="CHEX2",]$MolName = "CHEX2_MP"
-MPL[MPL$MolName=="CHEX3",]$MolName = "CHEX3_MP"
-MPL[MPL$MolName=="CHEX4",]$MolName = "CHEX4_MP"
-MPL[MPL$MolName=="IL6",]$MolName = "IL6_MP"
+colnames(expression_data) == sample_info$injection_order
 
+colnames(expression_data) = as.character(sample_info$sample_id)
 
+sample_info <- 
+  sample_info %>% 
+  dplyr::select(sample_id, injection_order, everything())
+
+dim(expression_data)
+dim(sample_info)
+dim(variable_info)
+
+sample_info$injection_order <- 
+  sample_info$injection_order %>% 
+  stringr::str_replace("X", "") %>% 
+  as.numeric()
+
+sample_info <- 
+  sample_info %>% 
+  dplyr::mutate(
+    class = case_when(
+      stringr::str_detect(Filenames, "QC") ~ "QC",
+      stringr::str_detect(Filenames, "blank") ~ "Blank",
+      TRUE ~ "Subject"
+    )
+  )
+
+save(expression_data, file = "metabolomics/data_preparation/peaks/expression_data")
+save(sample_info, file = "metabolomics/data_preparation/peaks/sample_info")
+save(variable_info, file = "metabolomics/data_preparation/peaks/variable_info")
+
+###metabolites
+variable_info <- 
+  variable_info %>%
+  dplyr::filter(!is.na(Level)) %>% 
+  dplyr::filter(Level == 1 | Level == 2)
+
+expression_data <-
+  expression_data[match(variable_info$variable_id, rownames(expression_data)),]
+
+rownames(expression_data) == variable_info$variable_id
+
+save(expression_data, file = "metabolomics/data_preparation/metabolites/expression_data")
+save(sample_info, file = "metabolomics/data_preparation/metabolites/sample_info")
+save(variable_info, file = "metabolomics/data_preparation/metabolites/variable_info")
 
 
 # cortisol 
@@ -284,7 +334,8 @@ cort = cort[10:102,]
 
 cort = left_join(cort,MetaData[,c("Name","CollectionTime","PrepIndex")])
 cort$DT = as.POSIXct(cort$CollectionTime, tz = "America/Los_Angeles", format = "%m/%d/%y %H:%M")
-cort = rename(cort, SampleID=PrepIndex)
+cort = 
+  dplyr::rename(cort, SampleID=PrepIndex)
 
 cortL = gather(cort,"Cytokine","MFI",5)
 cortL$Intensity = log10(as.numeric(cortL$MFI))
@@ -304,50 +355,36 @@ cytoL = gather(cyto,"Cytokine","MFI",5:49)
 cytoL$Intensity = log10(as.numeric(cytoL$MFI))
 cytoL$MolClass = "Cytokine_41Plex"
 cytoL$MolSubclass = NA
-cytoL = rename(cytoL, SampleID = PrepIndex, MolName = Cytokine)
+cytoL = dplyr::rename(cytoL, SampleID = PrepIndex, MolName = Cytokine)
 cytoL = select(cytoL, SampleID, DT, MolName, Intensity, MolClass, MolSubclass)
 
-all_omes = bind_rows(metab, lipids, proteinsL, MPL, cortL, cytoL)
 
-# add MolNum
-temp = tibble(MolName = unique(all_omes$MolName)) #, MolIndex = 1:n(MolName))
-temp$MolNum = 1:nrow(temp)
-all_omes = left_join(all_omes, temp)
+sample_info <- 
+  cytoL %>% 
+  dplyr::select(sample_id = SampleID, DT) %>% 
+  dplyr::distinct(sample_id, .keep_all = TRUE)
 
-all_omes_wear = bind_rows(all_omes, wearables)
-all_omes_wear_food = bind_rows(all_omes, wearables, FoodTimeL_sum)
+variable_info <- 
+  cytoL %>% 
+  dplyr::select(mol_name = MolName, mol_class = MolClass, mol_subclass = MolSubclass) %>% 
+  dplyr::distinct(mol_name, .keep_all = TRUE)
 
-all_omes = all_omes %>% mutate(day = date(DT), hour_of_day=hour(DT), tod = hms::as.hms(DT, tz="America/Los_Angeles"))
-all_omes = all_omes[all_omes$DT < as_date("2019-05-07"),]
+expression_data <- 
+  cytoL %>% 
+  dplyr::select(sample_id = SampleID, mol_name = MolName, Intensity) %>% 
+  tidyr::pivot_wider(names_from = sample_id, values_from = Intensity) %>% 
+  tibble::column_to_rownames(var = "mol_name")
 
-all_omes_wear = all_omes_wear %>% mutate(day = date(DT), hour_of_day=hour(DT), tod = hms::as.hms(DT, tz="America/Los_Angeles"))
-all_omes_wear_food = all_omes_wear_food %>% mutate(day = date(DT), hour_of_day=hour(DT), tod = hms::as.hms(DT, tz="America/Los_Angeles"))
+colnames(expression_data) == sample_info$sample_id
+rownames(expression_data) == variable_info$mol_name  
 
+variable_info <- 
+  variable_info %>% 
+  dplyr::mutate(variable_id = mol_name) %>% 
+  dplyr::select(variable_id, everything())
 
-grid = seq(as.POSIXct(floor_date(min(all_omes$DT),"hour")),as.POSIXct(max(all_omes$DT)),by="1 hour")
-
-all_omes_hr = all_omes %>% select(-KEGG_val, -HMDB_ID, -CAS_val, -Super.pathway, -Sub.pathway) %>% group_by(MolName,MolClass,MolSubclass,MolNum) %>% mutate(MI = mean(Intensity), SDI = sd(Intensity), Intensity_z = (Intensity - mean(Intensity,na.rm=T))/sd(Intensity,na.rm=T)) %>% nest() %>%
-  mutate(hr = map(data, function(x) as_tibble(approx(x$DT, x$Intensity_z, xout=grid, rule=1)))) %>%
-  unnest(hr) %>% rename(DT = x, Intensity = y)
-
-all_omes_hr = all_omes_hr[!is.na(all_omes_hr$Intensity),]
-all_omes_hr = all_omes_hr %>% group_by(MolName) %>% mutate(Hr = as.factor(as.numeric(difftime(DT, first(DT)), units="hours")), Hr_day = hour(DT), AM = am(DT))
-all_omes_hr = all_omes_hr[all_omes_hr$DT < as_date("2019-05-07"),]
-all_omes_hr = all_omes_hr %>% mutate(day = date(DT), hour_of_day=hour(DT), tod = hms::as.hms(DT, tz="America/Los_Angeles"))
-
-
-all_omes_wear = all_omes_wear %>% select(-KEGG_val, -HMDB_ID, -CAS_val, -Super.pathway, -Sub.pathway) %>% group_by(MolName,MolClass,MolSubclass,MolNum) %>% mutate(MI = mean(Intensity), SDI = sd(Intensity), Intensity_z = (Intensity - mean(Intensity,na.rm=T))/sd(Intensity,na.rm=T)) %>% nest() 
-all_omes_wear = all_omes_wear %>%
-  mutate(hr = map(data, function(x) as_tibble(approx(x$DT, x$Intensity_z, xout=grid, rule=1)))) %>%
-  unnest(hr) %>% rename(DT = x, Intensity = y)
-all_omes_wear = all_omes_wear[!is.na(all_omes_wear$Intensity),]
-all_omes_wear = all_omes_wear %>% group_by(MolName) %>% mutate(Hr = as.factor(as.numeric(difftime(DT, first(DT)), units="hours")), Hr_day = hour(DT), AM = am(DT))
-all_omes_wear = all_omes_wear[all_omes_wear$DT > "2019-04-29 03:00:00" & all_omes_wear$DT < as_date("2019-05-07"),]
-all_omes_wear = all_omes_wear %>% mutate(day = date(DT), hour_of_day=hour(DT), tod = hms::as.hms(DT, tz="America/Los_Angeles"))
-
-
-
-
-
+save(expression_data, file = "cortisol/data_preparation/expression_data")
+save(variable_info, file = "cortisol/data_preparation/variable_info")
+save(sample_info, file = "cortisol/data_preparation/sample_info")
 
 
